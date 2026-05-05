@@ -349,7 +349,7 @@ async function callClaude(systemPrompt, userDoc) {
     if (key)   body.apiKey = key;
     if (token) body.token  = token;
 
-    const res = await fetch('/api/claude', {
+    const res = await fetch('https://panel.tmishra.com/api/claude', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
