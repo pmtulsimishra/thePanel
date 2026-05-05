@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Panel — Reviewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<nav>
+  <a class="nav-logo" href="index.html"><span>The</span> Panel</a>
+</nav>
+
+<!-- API key bar -->
+<div class="api-bar">
+  <label for="apiKey">Anthropic API Key</label>
+  <input type="password" id="apiKey" placeholder="sk-ant-…" oninput="saveKey()" />
+  <span class="api-status" id="apiStatus">Enter your key to begin</span>
+</div>
+
+<div class="reviewer-wrap">
+
+  <!-- LEFT: document input -->
+  <div class="panel">
+    <h2>Your Document</h2>
+    <textarea id="docInput" placeholder="Paste your email, essay, pitch, blog post, or any text here…"></textarea>
+    <div class="run-bar">
+      <button class="run-btn" id="runAllBtn" onclick="runAll()">Run All Reviewers →</button>
+      <button class="clear-btn" onclick="clearAll()">Clear responses</button>
+    </div>
+  </div>
+
+  <!-- RIGHT: persona cards -->
+  <div class="panel right-panel">
+    <h2>Reviewers</h2>
+    <div class="personas-list" id="personasList"></div>
+    <button class="add-persona-btn" onclick="openModal()">+ Add custom reviewer</button>
+  </div>
+
+</div>
+
+<!-- Modal: add / edit persona -->
+<div class="modal-overlay hidden" id="modalOverlay">
+  <div class="modal">
+    <h3 id="modalTitle">Add Reviewer</h3>
+    <div>
+      <label>Emoji</label>
+      <input type="text" id="mEmoji" maxlength="2" placeholder="🤖" style="width:60px" />
+    </div>
+    <div>
+      <label>Name</label>
+      <input type="text" id="mName" placeholder="e.g. The Skeptic" />
+    </div>
+    <div>
+      <label>Tagline (shown under the name)</label>
+      <input type="text" id="mTagline" placeholder="e.g. Questions everything" />
+    </div>
+    <div>
+      <label>System prompt (defines their personality)</label>
+      <textarea id="mPrompt" style="min-height:120px" placeholder="You are a seasoned venture capitalist who has seen thousands of pitches…"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-save" onclick="savePersona()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Default personas ───────────────────────────────────────────────────────
+const DEFAULT_PERSONAS = [
+  {
+    id: 'devil',
+    emoji: '😈',
+    name: "The Devil's Advocate",
+    tagline: 'Challenges assumptions & logic',
+    prompt: `You are a sharp, skeptical thinker who reviews documents by challenging every assumption, claim, and logical leap. Your job is to find the holes before anyone else does. Be direct but constructive. Bullet-point your key objections, then give one actionable suggestion for each.`,
+  },
+  {
+    id: 'clarity',
+    emoji: '🔍',
+    name: 'The Clarity Coach',
+    tagline: 'Readability & structure',
+    prompt: `You are an expert editor focused entirely on clarity, flow, and structure. You cut jargon, flag confusing sentences, and ensure the document's message is immediately obvious. Give specific rewrite suggestions, not vague advice.`,
+  },
+  {
+    id: 'expert',
+    emoji: '🎓',
+    name: 'The Domain Expert',
+    tagline: 'Accuracy & technical depth',
+    prompt: `You are a highly credible domain expert reviewing for factual accuracy, appropriate depth, and professional standards. Call out anything that is oversimplified, exaggerated, or missing critical nuance. Rate the overall credibility out of 10 and explain why.`,
+  },
+  {
+    id: 'user',
+    emoji: '👤',
+    name: 'The End User',
+    tagline: 'Reacts as the target reader',
+    prompt: `You are the target audience for this document — read it as a real person would for the first time. Note where you got confused, bored, convinced, or skeptical. Be honest and specific. What would make you more likely to act on or believe this document?`,
+  },
+];
+
+// ── State ──────────────────────────────────────────────────────────────────
+let personas = JSON.parse(localStorage.getItem('panel_personas') || 'null') || DEFAULT_PERSONAS.map(p => ({...p}));
+let editingId = null;
+
+function savePersonas() { localStorage.setItem('panel_personas', JSON.stringify(personas)); }
+
+// ── API key ────────────────────────────────────────────────────────────────
+function saveKey() {
+  const val = document.getElementById('apiKey').value.trim();
+  sessionStorage.setItem('panel_key', val);
+  document.getElementById('apiStatus').textContent = val.startsWith('sk-ant-') ? '✓ Key saved' : 'Enter your key to begin';
+  document.getElementById('apiStatus').className = 'api-status' + (val.startsWith('sk-ant-') ? ' ok' : '');
+}
+
+function getKey() {
+  const k = sessionStorage.getItem('panel_key') || '';
+  if (!k) { document.getElementById('apiKey').focus(); }
+  return k;
+}
+
+// ── Render personas ────────────────────────────────────────────────────────
+function render() {
+  const list = document.getElementById('personasList');
+  list.innerHTML = '';
+  personas.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'persona-review-card';
+    card.id = 'card-' + p.id;
+    card.innerHTML = `
+      <div class="persona-header" onclick="toggleCard('${p.id}')">
+        <span class="persona-icon">${p.emoji}</span>
+        <div class="persona-info">
+          <h3>${p.name}</h3>
+          <p>${p.tagline}</p>
+        </div>
+        <button class="persona-run-btn" id="btn-${p.id}" onclick="event.stopPropagation(); runOne('${p.id}')">Review →</button>
+        <button class="persona-run-btn" style="margin-left:4px;color:#888" onclick="event.stopPropagation(); editPersona('${p.id}')">edit</button>
+        <button class="persona-run-btn" style="margin-left:4px;color:#e05" onclick="event.stopPropagation(); deletePersona('${p.id}')">✕</button>
+      </div>
+      <div class="persona-response" id="resp-${p.id}"></div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+function toggleCard(id) {
+  const resp = document.getElementById('resp-' + id);
+  if (resp.textContent) resp.classList.toggle('visible');
+}
+
+// ── Call Claude ────────────────────────────────────────────────────────────
+async function callClaude(systemPrompt, userDoc) {
+  const key = getKey();
+  if (!key) throw new Error('No API key');
+
+  const res = await fetch('/api/claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ system: systemPrompt, document: userDoc }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.text;
+}
+
+// ── Run one ────────────────────────────────────────────────────────────────
+async function runOne(id) {
+  const doc = document.getElementById('docInput').value.trim();
+  if (!doc) { alert('Please paste a document first.'); return; }
+  if (!getKey()) { alert('Enter your Anthropic API key at the top.'); return; }
+
+  const persona = personas.find(p => p.id === id);
+  const resp = document.getElementById('resp-' + id);
+  const btn  = document.getElementById('btn-' + id);
+
+  btn.disabled = true;
+  btn.textContent = '…';
+  resp.className = 'persona-response visible loading';
+  resp.textContent = `${persona.emoji} ${persona.name} is reading your document…`;
+
+  try {
+    const text = await callClaude(persona.prompt, doc);
+    resp.className = 'persona-response visible';
+    resp.textContent = text;
+  } catch (e) {
+    resp.className = 'persona-response visible';
+    resp.textContent = `Error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Review →';
+  }
+}
+
+// ── Run all ────────────────────────────────────────────────────────────────
+async function runAll() {
+  const doc = document.getElementById('docInput').value.trim();
+  if (!doc) { alert('Please paste a document first.'); return; }
+  if (!getKey()) { alert('Enter your Anthropic API key at the top.'); return; }
+
+  document.getElementById('runAllBtn').disabled = true;
+  await Promise.all(personas.map(p => runOne(p.id)));
+  document.getElementById('runAllBtn').disabled = false;
+}
+
+function clearAll() {
+  document.querySelectorAll('.persona-response').forEach(el => {
+    el.className = 'persona-response';
+    el.textContent = '';
+  });
+}
+
+// ── Modal ──────────────────────────────────────────────────────────────────
+function openModal(id) {
+  editingId = id || null;
+  document.getElementById('modalTitle').textContent = id ? 'Edit Reviewer' : 'Add Reviewer';
+  if (id) {
+    const p = personas.find(x => x.id === id);
+    document.getElementById('mEmoji').value   = p.emoji;
+    document.getElementById('mName').value    = p.name;
+    document.getElementById('mTagline').value = p.tagline;
+    document.getElementById('mPrompt').value  = p.prompt;
+  } else {
+    document.getElementById('mEmoji').value   = '';
+    document.getElementById('mName').value    = '';
+    document.getElementById('mTagline').value = '';
+    document.getElementById('mPrompt').value  = '';
+  }
+  document.getElementById('modalOverlay').classList.remove('hidden');
+}
+
+function closeModal() { document.getElementById('modalOverlay').classList.add('hidden'); }
+
+function savePersona() {
+  const emoji   = document.getElementById('mEmoji').value.trim()   || '🤖';
+  const name    = document.getElementById('mName').value.trim();
+  const tagline = document.getElementById('mTagline').value.trim();
+  const prompt  = document.getElementById('mPrompt').value.trim();
+  if (!name || !prompt) { alert('Name and system prompt are required.'); return; }
+
+  if (editingId) {
+    const p = personas.find(x => x.id === editingId);
+    Object.assign(p, { emoji, name, tagline, prompt });
+  } else {
+    personas.push({ id: 'p' + Date.now(), emoji, name, tagline, prompt });
+  }
+  savePersonas();
+  render();
+  closeModal();
+}
+
+function editPersona(id) { openModal(id); }
+
+function deletePersona(id) {
+  if (!confirm('Remove this reviewer?')) return;
+  personas = personas.filter(p => p.id !== id);
+  savePersonas();
+  render();
+}
+
+// Close modal on backdrop click
+document.getElementById('modalOverlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modalOverlay')) closeModal();
+});
+
+// Restore key from session
+const savedKey = sessionStorage.getItem('panel_key') || '';
+if (savedKey) {
+  document.getElementById('apiKey').value = savedKey;
+  saveKey();
+}
+
+render();
+</script>
+</body>
+</html>

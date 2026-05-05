@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Panel — Multi-Persona Document Reviewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo"><span>The</span> Panel</div>
+  <button class="nav-cta" onclick="location.href='reviewer.html'">Try it free →</button>
+</nav>
+
+<section class="hero">
+  <div class="hero-badge">Powered by Claude AI</div>
+  <h1>Get feedback from<br/><span>every angle</span> at once</h1>
+  <p>Paste your document and instantly hear from a critic, an editor, a domain expert, and your target reader — all at the same time.</p>
+  <div class="hero-actions">
+    <button class="btn-primary" onclick="location.href='reviewer.html'">Start reviewing →</button>
+    <button class="btn-secondary" onclick="document.getElementById('how').scrollIntoView()">See how it works</button>
+  </div>
+</section>
+
+<section class="personas-preview">
+  <div class="persona-card">
+    <div class="persona-emoji">😈</div>
+    <h3>The Devil's Advocate</h3>
+    <p>Challenges every assumption and exposes logical gaps before anyone else does.</p>
+  </div>
+  <div class="persona-card">
+    <div class="persona-emoji">🔍</div>
+    <h3>The Clarity Coach</h3>
+    <p>Cuts jargon, tightens structure, and makes sure your message lands.</p>
+  </div>
+  <div class="persona-card">
+    <div class="persona-emoji">🎓</div>
+    <h3>The Domain Expert</h3>
+    <p>Checks your facts, depth, and credibility against real-world standards.</p>
+  </div>
+  <div class="persona-card">
+    <div class="persona-emoji">👤</div>
+    <h3>The End User</h3>
+    <p>Reacts exactly like your target reader — confused, skeptical, or convinced.</p>
+  </div>
+</section>
+
+<section class="how" id="how">
+  <h2>How it works</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">01</div>
+      <h3>Paste your document</h3>
+      <p>Emails, essays, proposals, pitches, blog posts — any text works.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">02</div>
+      <h3>Choose your reviewers</h3>
+      <p>Use the four built-in personas or create your own with a custom prompt.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">03</div>
+      <h3>Run all at once</h3>
+      <p>All reviewers respond in parallel. No waiting for one to finish before the next.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">04</div>
+      <h3>Iterate fast</h3>
+      <p>Edit your document, re-run any reviewer, and watch the feedback change.</p>
+    </div>
+  </div>
+</section>
+
+<section class="cta-band">
+  <h2>Ready to stress-test your writing?</h2>
+  <p>No signup needed. Just bring your API key and your document.</p>
+  <button class="btn-primary" onclick="location.href='reviewer.html'">Open The Panel →</button>
+</section>
+
+<footer>Built with Claude · <a href="reviewer.html">Launch app</a></footer>
+
+</body>
+</html>
