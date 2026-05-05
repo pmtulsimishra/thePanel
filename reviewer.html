@@ -15,11 +15,12 @@
   <a class="nav-logo" href="index.html"><span>The</span> Panel</a>
 </nav>
 
-<!-- API key bar (optional — server uses env var if empty) -->
+<!-- API key bar -->
 <div class="api-bar">
-  <label for="apiKey">API Key <span style="color:#555;font-weight:400">(optional if hosted)</span></label>
-  <input type="password" id="apiKey" placeholder="sk-ant-… leave blank if key is set on server" oninput="saveKey()" />
-  <span class="api-status" id="apiStatus"></span>
+  <label for="apiKey">Anthropic API Key</label>
+  <input type="password" id="apiKey" placeholder="sk-ant-…" oninput="saveKey()" />
+  <span class="api-status" id="apiStatus">Enter your key to begin</span>
+  <a href="https://console.anthropic.com/settings/keys" target="_blank" style="font-size:0.78rem;color:var(--muted);white-space:nowrap">Get a key →</a>
 </div>
 
 <div class="reviewer-wrap">
@@ -193,9 +194,9 @@ function saveKey() {
   if (val) sessionStorage.setItem('panel_key', val);
   else sessionStorage.removeItem('panel_key');
   const status = document.getElementById('apiStatus');
-  if (!val) { status.textContent = ''; status.className = 'api-status'; }
-  else if (val.startsWith('sk-ant-')) { status.textContent = '✓ Key saved'; status.className = 'api-status ok'; }
-  else { status.textContent = 'Unexpected key format'; status.className = 'api-status'; }
+  if (!val)                    { status.textContent = 'Enter your key to begin'; status.className = 'api-status'; }
+  else if (val.startsWith('sk-ant-')) { status.textContent = '✓ Ready';           status.className = 'api-status ok'; }
+  else                         { status.textContent = 'Unexpected key format';    status.className = 'api-status'; }
 }
 
 function getKey() { return sessionStorage.getItem('panel_key') || ''; }
@@ -267,24 +268,33 @@ function toggleCard(id) {
   if (resp.textContent) resp.classList.toggle('visible');
 }
 
-// ── Call Claude ────────────────────────────────────────────────────────────
+// ── Call Claude (direct browser → Anthropic API) ──────────────────────────
 async function callClaude(systemPrompt, userDoc) {
-  const body = { system: systemPrompt, document: userDoc };
   const key = getKey();
-  if (key) body.apiKey = key;
+  if (!key) throw new Error('No API key — enter your Anthropic key at the top.');
 
-  const res = await fetch('/api/claude', {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    headers: {
+      'x-api-key':                              key,
+      'anthropic-version':                      '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'content-type':                           'application/json',
+    },
+    body: JSON.stringify({
+      model:      'claude-opus-4-7',
+      max_tokens: 1024,
+      system:     systemPrompt,
+      messages:   [{ role: 'user', content: `Please review the following document:\n\n${userDoc}` }],
+    }),
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    throw new Error(err.error?.message || `HTTP ${res.status}`);
   }
   const data = await res.json();
-  return data.text;
+  return data.content[0].text;
 }
 
 // ── Run one ────────────────────────────────────────────────────────────────
