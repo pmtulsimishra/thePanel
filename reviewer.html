@@ -15,12 +15,17 @@
   <a class="nav-logo" href="index.html"><span>The</span> Panel</a>
 </nav>
 
-<!-- API key bar -->
-<div class="api-bar">
+<!-- API key bar — shown only when not on hosted Vercel -->
+<div class="api-bar" id="apiBar">
   <label for="apiKey">Anthropic API Key</label>
   <input type="password" id="apiKey" placeholder="sk-ant-…" oninput="saveKey()" />
   <span class="api-status" id="apiStatus">Enter your key to begin</span>
   <a href="https://console.anthropic.com/settings/keys" target="_blank" style="font-size:0.78rem;color:var(--muted);white-space:nowrap">Get a key →</a>
+</div>
+<!-- Hosted banner — shown only on Vercel -->
+<div class="api-bar" id="hostedBanner" style="display:none">
+  <span style="color:#4ade80;font-size:0.85rem;font-weight:600">✓ Hosted API active</span>
+  <span style="color:var(--muted);font-size:0.82rem">— No key needed. Powered by the server.</span>
 </div>
 
 <div class="reviewer-wrap">
@@ -268,33 +273,58 @@ function toggleCard(id) {
   if (resp.textContent) resp.classList.toggle('visible');
 }
 
-// ── Call Claude (direct browser → Anthropic API) ──────────────────────────
+// ── Environment detection ──────────────────────────────────────────────────
+// On Vercel: use /api/claude (server holds the key)
+// On GitHub Pages / localhost with no server key: call Anthropic directly
+const IS_VERCEL = !window.location.hostname.includes('github.io')
+               && window.location.hostname !== 'localhost'
+               && window.location.hostname !== '127.0.0.1';
+
+// ── Call Claude ────────────────────────────────────────────────────────────
 async function callClaude(systemPrompt, userDoc) {
-  const key = getKey();
-  if (!key) throw new Error('No API key — enter your Anthropic key at the top.');
+  if (IS_VERCEL) {
+    // Server-side proxy — API key lives in Vercel env vars
+    const body = { system: systemPrompt, document: userDoc };
+    const key  = getKey();
+    if (key) body.apiKey = key; // allow override if user pastes their own
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key':                              key,
-      'anthropic-version':                      '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'content-type':                           'application/json',
-    },
-    body: JSON.stringify({
-      model:      'claude-opus-4-7',
-      max_tokens: 1024,
-      system:     systemPrompt,
-      messages:   [{ role: 'user', content: `Please review the following document:\n\n${userDoc}` }],
-    }),
-  });
+    const res = await fetch('/api/claude', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return (await res.json()).text;
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || `HTTP ${res.status}`);
+  } else {
+    // Direct browser → Anthropic (GitHub Pages / local without server)
+    const key = getKey();
+    if (!key) throw new Error('No API key — enter your Anthropic key at the top.');
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:  'POST',
+      headers: {
+        'x-api-key':                                 key,
+        'anthropic-version':                         '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type':                              'application/json',
+      },
+      body: JSON.stringify({
+        model:    'claude-opus-4-7',
+        max_tokens: 1024,
+        system:   systemPrompt,
+        messages: [{ role: 'user', content: `Please review the following document:\n\n${userDoc}` }],
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${res.status}`);
+    }
+    return (await res.json()).content[0].text;
   }
-  const data = await res.json();
-  return data.content[0].text;
 }
 
 // ── Run one ────────────────────────────────────────────────────────────────
@@ -399,8 +429,13 @@ document.getElementById('modalOverlay').addEventListener('click', e => {
   if (e.target === document.getElementById('modalOverlay')) closeModal();
 });
 
-const savedKey = sessionStorage.getItem('panel_key') || '';
-if (savedKey) { document.getElementById('apiKey').value = savedKey; saveKey(); }
+if (IS_VERCEL) {
+  document.getElementById('apiBar').style.display       = 'none';
+  document.getElementById('hostedBanner').style.display = 'flex';
+} else {
+  const savedKey = sessionStorage.getItem('panel_key') || '';
+  if (savedKey) { document.getElementById('apiKey').value = savedKey; saveKey(); }
+}
 
 render();
 </script>
