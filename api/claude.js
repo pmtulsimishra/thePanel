@@ -1,11 +1,36 @@
+import crypto from 'crypto';
+
+function verifyToken(token, secret) {
+  const [data, sig] = token.split('.');
+  if (!data || !sig) throw new Error('Malformed token');
+  const expected = crypto.createHmac('sha256', secret).update(data).digest('hex');
+  if (sig !== expected) throw new Error('Invalid token');
+  const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
+  if (payload.exp < Date.now()) throw new Error('Token expired — please renew your subscription');
+  return payload;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { system, document: doc, apiKey } = req.body;
-  const key = apiKey || process.env.ANTHROPIC_API_KEY;
+  const { system, document: doc, apiKey, token } = req.body;
 
+  // User-provided key bypasses paywall (they're paying Anthropic directly)
+  const key = apiKey || process.env.ANTHROPIC_API_KEY;
   if (!key) {
-    return res.status(500).json({ error: 'No API key — set ANTHROPIC_API_KEY in Vercel env vars or enter one above.' });
+    return res.status(500).json({ error: 'No API key configured on server.' });
+  }
+
+  // Enforce paywall for server-hosted API key requests
+  if (!apiKey && process.env.STRIPE_SECRET_KEY) {
+    if (!token) {
+      return res.status(402).json({ error: 'free_limit_reached' });
+    }
+    try {
+      verifyToken(token, process.env.TOKEN_SECRET);
+    } catch (e) {
+      return res.status(402).json({ error: e.message });
+    }
   }
 
   try {

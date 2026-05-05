@@ -37,6 +37,7 @@
     <div class="run-bar">
       <button class="run-btn" id="runAllBtn" onclick="runAll()">Run All Reviewers →</button>
       <button class="clear-btn" onclick="clearAll()">Clear responses</button>
+      <span id="freeCounter" style="font-size:0.8rem;color:var(--muted);margin-left:auto"></span>
     </div>
     <div id="triggerHints" style="font-size:0.8rem;color:var(--muted);margin-top:0.25rem;min-height:1.2em"></div>
   </div>
@@ -48,6 +49,26 @@
     <button class="add-persona-btn" onclick="openModal()">+ Add custom reviewer</button>
   </div>
 
+</div>
+
+<!-- Paywall modal -->
+<div class="modal-overlay hidden" id="paywallOverlay">
+  <div class="modal" style="text-align:center;max-width:420px">
+    <div style="font-size:2.5rem;margin-bottom:0.5rem">🎭</div>
+    <h3 style="font-size:1.4rem;margin-bottom:0.5rem">You've used your 5 free reviews</h3>
+    <p style="color:var(--muted);font-size:0.9rem;margin-bottom:1.5rem">
+      Unlock unlimited reviews for <strong style="color:var(--text)">$15 / month</strong>.<br/>
+      Cancel anytime. Powered by Stripe.
+    </p>
+    <button class="modal-save" style="width:100%;padding:0.9rem;font-size:1rem" onclick="startCheckout()">
+      Subscribe — $15/month →
+    </button>
+    <p style="margin-top:1rem;font-size:0.78rem;color:var(--muted)">
+      Or bring your own API key:
+      <a href="https://console.anthropic.com/settings/keys" target="_blank">get one here</a>
+      and enter it in the bar at the top.
+    </p>
+  </div>
 </div>
 
 <!-- Modal: add / edit persona -->
@@ -273,20 +294,59 @@ function toggleCard(id) {
   if (resp.textContent) resp.classList.toggle('visible');
 }
 
-// ── Environment detection ──────────────────────────────────────────────────
-// On Vercel: use /api/claude (server holds the key)
-// On GitHub Pages / localhost with no server key: call Anthropic directly
+// ── Environment & paywall ──────────────────────────────────────────────────
 const IS_VERCEL = !window.location.hostname.includes('github.io')
                && window.location.hostname !== 'localhost'
                && window.location.hostname !== '127.0.0.1';
 
+const FREE_REVIEWS = 5;
+
+function getReviewCount() { return parseInt(localStorage.getItem('panel_count') || '0', 10); }
+function bumpReviewCount() { localStorage.setItem('panel_count', getReviewCount() + 1); updateCounter(); }
+function getAccessToken()  { return localStorage.getItem('panel_token') || ''; }
+function setAccessToken(t) { localStorage.setItem('panel_token', t); }
+
+function isPaidOrKeyed() {
+  return !!getKey() || !!getAccessToken();
+}
+
+function checkPaywall() {
+  if (!IS_VERCEL) return false; // GitHub Pages: no paywall
+  if (isPaidOrKeyed()) return false;
+  if (getReviewCount() < FREE_REVIEWS) return false;
+  return true;
+}
+
+function updateCounter() {
+  if (!IS_VERCEL || isPaidOrKeyed()) return;
+  const used = getReviewCount();
+  const left = Math.max(0, FREE_REVIEWS - used);
+  const el = document.getElementById('freeCounter');
+  if (el) el.textContent = left > 0 ? `${left} free review${left === 1 ? '' : 's'} remaining` : 'Free reviews used';
+}
+
+async function startCheckout() {
+  const btn = document.querySelector('#paywallOverlay .modal-save');
+  btn.disabled = true; btn.textContent = 'Redirecting…';
+  try {
+    const res  = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const data = await res.json();
+    if (data.url) window.location.href = data.url;
+    else throw new Error(data.error || 'Could not start checkout');
+  } catch (e) {
+    alert('Checkout error: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Subscribe — $15/month →';
+  }
+}
+
 // ── Call Claude ────────────────────────────────────────────────────────────
 async function callClaude(systemPrompt, userDoc) {
   if (IS_VERCEL) {
-    // Server-side proxy — API key lives in Vercel env vars
     const body = { system: systemPrompt, document: userDoc };
-    const key  = getKey();
-    if (key) body.apiKey = key; // allow override if user pastes their own
+    const key   = getKey();
+    const token = getAccessToken();
+    if (key)   body.apiKey = key;
+    if (token) body.token  = token;
 
     const res = await fetch('/api/claude', {
       method:  'POST',
@@ -295,15 +355,17 @@ async function callClaude(systemPrompt, userDoc) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
+      if (err.error === 'free_limit_reached') {
+        document.getElementById('paywallOverlay').classList.remove('hidden');
+        throw new Error('Upgrade to continue');
+      }
       throw new Error(err.error || `HTTP ${res.status}`);
     }
     return (await res.json()).text;
 
   } else {
-    // Direct browser → Anthropic (GitHub Pages / local without server)
     const key = getKey();
     if (!key) throw new Error('No API key — enter your Anthropic key at the top.');
-
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method:  'POST',
       headers: {
@@ -313,10 +375,10 @@ async function callClaude(systemPrompt, userDoc) {
         'content-type':                              'application/json',
       },
       body: JSON.stringify({
-        model:    'claude-opus-4-7',
+        model:      'claude-opus-4-7',
         max_tokens: 1024,
-        system:   systemPrompt,
-        messages: [{ role: 'user', content: `Please review the following document:\n\n${userDoc}` }],
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content: `Please review the following document:\n\n${userDoc}` }],
       }),
     });
     if (!res.ok) {
@@ -332,6 +394,11 @@ async function runOne(id) {
   const doc = document.getElementById('docInput').value.trim();
   if (!doc) { alert('Please paste a document first.'); return; }
 
+  if (checkPaywall()) {
+    document.getElementById('paywallOverlay').classList.remove('hidden');
+    return;
+  }
+
   const persona = personas.find(p => p.id === id);
   const resp = document.getElementById('resp-' + id);
   const btn  = document.getElementById('btn-' + id);
@@ -345,6 +412,7 @@ async function runOne(id) {
     const text = await callClaude(persona.prompt, doc);
     resp.className = 'persona-response visible';
     resp.textContent = text;
+    bumpReviewCount();
   } catch (e) {
     resp.className = 'persona-response visible';
     resp.textContent = `Error: ${e.message}`;
@@ -358,6 +426,11 @@ async function runOne(id) {
 async function runAll() {
   const doc = document.getElementById('docInput').value.trim();
   if (!doc) { alert('Please paste a document first.'); return; }
+
+  if (checkPaywall()) {
+    document.getElementById('paywallOverlay').classList.remove('hidden');
+    return;
+  }
 
   const triggers = detectTriggers(doc);
   const toRun = personas.filter(p => {
@@ -429,13 +502,43 @@ document.getElementById('modalOverlay').addEventListener('click', e => {
   if (e.target === document.getElementById('modalOverlay')) closeModal();
 });
 
+// ── Handle Stripe redirect ─────────────────────────────────────────────────
+const urlParams = new URLSearchParams(window.location.search);
+const stripeSession = urlParams.get('session');
+if (stripeSession) {
+  history.replaceState({}, '', window.location.pathname); // clean URL
+  fetch(`/api/verify-payment?session=${stripeSession}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.token) {
+        setAccessToken(data.token);
+        document.getElementById('hostedBanner').innerHTML =
+          `<span style="color:#4ade80;font-size:0.85rem;font-weight:600">✓ Subscribed</span>
+           <span style="color:var(--muted);font-size:0.82rem">— Welcome, ${data.email}. Unlimited reviews unlocked.</span>`;
+      }
+    })
+    .catch(() => {});
+}
+
 if (IS_VERCEL) {
   document.getElementById('apiBar').style.display       = 'none';
   document.getElementById('hostedBanner').style.display = 'flex';
+  if (getAccessToken()) {
+    document.getElementById('hostedBanner').innerHTML =
+      `<span style="color:#4ade80;font-size:0.85rem;font-weight:600">✓ Subscribed</span>
+       <span style="color:var(--muted);font-size:0.82rem">— Unlimited reviews active.</span>`;
+  }
+  updateCounter();
 } else {
   const savedKey = sessionStorage.getItem('panel_key') || '';
   if (savedKey) { document.getElementById('apiKey').value = savedKey; saveKey(); }
 }
+
+document.getElementById('paywallOverlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('paywallOverlay')) {
+    document.getElementById('paywallOverlay').classList.add('hidden');
+  }
+});
 
 render();
 </script>
