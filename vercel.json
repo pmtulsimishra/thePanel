@@ -1,6 +1,3 @@
 {
-  "framework": null,
-  "rewrites": [
-    { "source": "/api/claude", "destination": "/api/claude.js" }
-  ]
+  "framework": null
 }
