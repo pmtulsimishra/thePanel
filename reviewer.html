@@ -15,11 +15,11 @@
   <a class="nav-logo" href="index.html"><span>The</span> Panel</a>
 </nav>
 
-<!-- API key bar -->
+<!-- API key bar (optional — server uses env var if empty) -->
 <div class="api-bar">
-  <label for="apiKey">Anthropic API Key</label>
-  <input type="password" id="apiKey" placeholder="sk-ant-…" oninput="saveKey()" />
-  <span class="api-status" id="apiStatus">Enter your key to begin</span>
+  <label for="apiKey">API Key <span style="color:#555;font-weight:400">(optional if hosted)</span></label>
+  <input type="password" id="apiKey" placeholder="sk-ant-… leave blank if key is set on server" oninput="saveKey()" />
+  <span class="api-status" id="apiStatus"></span>
 </div>
 
 <div class="reviewer-wrap">
@@ -27,11 +27,12 @@
   <!-- LEFT: document input -->
   <div class="panel">
     <h2>Your Document</h2>
-    <textarea id="docInput" placeholder="Paste your email, essay, pitch, blog post, or any text here…"></textarea>
+    <textarea id="docInput" placeholder="Paste your email, essay, pitch, product review, financial model, blog post…" oninput="onDocChange()"></textarea>
     <div class="run-bar">
       <button class="run-btn" id="runAllBtn" onclick="runAll()">Run All Reviewers →</button>
       <button class="clear-btn" onclick="clearAll()">Clear responses</button>
     </div>
+    <div id="triggerHints" style="font-size:0.8rem;color:var(--muted);margin-top:0.25rem;min-height:1.2em"></div>
   </div>
 
   <!-- RIGHT: persona cards -->
@@ -77,7 +78,7 @@ const DEFAULT_PERSONAS = [
     id: 'devil',
     emoji: '😈',
     name: "The Devil's Advocate",
-    tagline: 'Challenges assumptions & logic',
+    tagline: 'Challenges every assumption',
     prompt: `You are a sharp, skeptical thinker who reviews documents by challenging every assumption, claim, and logical leap. Your job is to find the holes before anyone else does. Be direct but constructive. Bullet-point your key objections, then give one actionable suggestion for each.`,
   },
   {
@@ -101,10 +102,87 @@ const DEFAULT_PERSONAS = [
     tagline: 'Reacts as the target reader',
     prompt: `You are the target audience for this document — read it as a real person would for the first time. Note where you got confused, bored, convinced, or skeptical. Be honest and specific. What would make you more likely to act on or believe this document?`,
   },
+  {
+    id: 'grammar',
+    emoji: '✍️',
+    name: 'The Grammar Nazi',
+    tagline: 'Ruthless language perfection',
+    prompt: `You are an obsessive grammarian and language purist. You review documents with zero tolerance for grammatical errors, awkward phrasing, passive voice abuse, dangling modifiers, punctuation mistakes, and inconsistent tense. Format your response as:
+
+**Errors Found:** list every grammar/punctuation/spelling error with the original text and the corrected version.
+**Style Issues:** flag passive voice, wordiness, and weak word choices.
+**Verdict:** one-line overall language grade (A–F) with a brief reason.
+
+Be precise and exhaustive. Do not skip minor issues.`,
+  },
+  {
+    id: 'mba',
+    emoji: '💼',
+    name: 'The MBA Strategist',
+    tagline: 'Product, market & cannibalization',
+    trigger: 'product',
+    triggerLabel: 'Activates on product content',
+    prompt: `You are a sharp MBA-trained product strategist with deep experience in go-to-market, competitive analysis, and product portfolio management. When reviewing a document, you focus on:
+
+1. **Competitive Landscape** — Who are the existing players? Does this product/idea compete with or cannibalize existing offerings (from the same company or ecosystem)?
+2. **Market Positioning** — Is the positioning differentiated enough? What's the risk of being commoditized or outflanked?
+3. **Cannibalization Risk** — Does this new product eat into an existing revenue stream? Is that intentional or a blind spot?
+4. **Strategic Flaws** — What assumptions about the market or customer behavior are unvalidated?
+5. **Recommendation** — One clear strategic pivot or action.
+
+Be direct, use frameworks where helpful (Porter's Five Forces, Jobs-to-be-Done, etc.), and don't soften your critique.`,
+  },
+  {
+    id: 'finance',
+    emoji: '💰',
+    name: 'The Finance Reviewer',
+    tagline: 'Finds financial flaws & risks',
+    trigger: 'finance',
+    triggerLabel: 'Activates when numbers are involved',
+    prompt: `You are a rigorous CFO-level finance reviewer. You scrutinize any document containing numbers, projections, costs, revenue, or financial claims. Your review covers:
+
+1. **Number Sanity Check** — Are the figures internally consistent? Do the math. Flag any arithmetic errors or impossible numbers.
+2. **Assumption Audit** — What growth rates, margins, or cost assumptions are baked in? Are they realistic or optimistic?
+3. **Missing Metrics** — What key financial metrics are conspicuously absent (CAC, LTV, payback period, burn rate, gross margin)?
+4. **Risk Exposure** — What financial scenarios could break this model? Downside case?
+5. **Red Flags** — Any numbers that look cherry-picked, misleading, or designed to obscure bad performance?
+
+Be specific about which numbers you're questioning and why. Show your work.`,
+  },
 ];
 
+// ── Trigger keyword lists ──────────────────────────────────────────────────
+const PRODUCT_KEYWORDS = [
+  'product', 'launch', 'market', 'competitor', 'roadmap', 'feature', 'go-to-market',
+  'gtm', 'cannibali', 'mvp', 'strategy', 'positioning', 'segment', 'customer journey',
+  'use case', 'user story', 'persona', 'pricing tier', 'differenti', 'value prop',
+  'product-market', 'competitive', 'incumbent', 'disruption', 'beachhead',
+];
+const FINANCE_KEYWORDS = [
+  'revenue', 'cost', 'profit', 'margin', 'roi', 'ebitda', 'budget', 'forecast',
+  'arr', 'mrr', 'arpu', 'cac', 'ltv', 'burn', 'runway', 'valuation', 'funding',
+  'payback', 'churn', 'gross margin', 'net margin', 'capex', 'opex', 'cogs',
+  'million', 'billion', 'thousand', 'pricing', 'subscription', 'deal size',
+];
+const FINANCE_REGEX = /\$[\d,]+|[\d,]+%|\d+[xX]\s/;
+
+function detectTriggers(doc) {
+  const lower = doc.toLowerCase();
+  const hasProduct = PRODUCT_KEYWORDS.some(k => lower.includes(k));
+  const hasFinance  = FINANCE_KEYWORDS.some(k => lower.includes(k)) || FINANCE_REGEX.test(doc);
+  return { product: hasProduct, finance: hasFinance };
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
-let personas = JSON.parse(localStorage.getItem('panel_personas') || 'null') || DEFAULT_PERSONAS.map(p => ({...p}));
+function loadPersonas() {
+  const stored = JSON.parse(localStorage.getItem('panel_personas') || 'null');
+  if (!stored) return DEFAULT_PERSONAS.map(p => ({ ...p }));
+  // Merge in any new default personas not yet in storage
+  const missing = DEFAULT_PERSONAS.filter(d => !stored.find(s => s.id === d.id));
+  return [...stored, ...missing];
+}
+
+let personas  = loadPersonas();
 let editingId = null;
 
 function savePersonas() { localStorage.setItem('panel_personas', JSON.stringify(personas)); }
@@ -112,15 +190,40 @@ function savePersonas() { localStorage.setItem('panel_personas', JSON.stringify(
 // ── API key ────────────────────────────────────────────────────────────────
 function saveKey() {
   const val = document.getElementById('apiKey').value.trim();
-  sessionStorage.setItem('panel_key', val);
-  document.getElementById('apiStatus').textContent = val.startsWith('sk-ant-') ? '✓ Key saved' : 'Enter your key to begin';
-  document.getElementById('apiStatus').className = 'api-status' + (val.startsWith('sk-ant-') ? ' ok' : '');
+  if (val) sessionStorage.setItem('panel_key', val);
+  else sessionStorage.removeItem('panel_key');
+  const status = document.getElementById('apiStatus');
+  if (!val) { status.textContent = ''; status.className = 'api-status'; }
+  else if (val.startsWith('sk-ant-')) { status.textContent = '✓ Key saved'; status.className = 'api-status ok'; }
+  else { status.textContent = 'Unexpected key format'; status.className = 'api-status'; }
 }
 
-function getKey() {
-  const k = sessionStorage.getItem('panel_key') || '';
-  if (!k) { document.getElementById('apiKey').focus(); }
-  return k;
+function getKey() { return sessionStorage.getItem('panel_key') || ''; }
+
+// ── Trigger detection & hints ──────────────────────────────────────────────
+function onDocChange() {
+  const doc = document.getElementById('docInput').value;
+  const triggers = detectTriggers(doc);
+  updateTriggerBadges(triggers);
+
+  const hints = [];
+  if (triggers.product) hints.push('💼 Product content detected — MBA Strategist will run');
+  if (triggers.finance)  hints.push('💰 Numbers detected — Finance Reviewer will run');
+  document.getElementById('triggerHints').textContent = hints.join('  ·  ');
+}
+
+function updateTriggerBadges(triggers) {
+  personas.forEach(p => {
+    const badge = document.getElementById('trigger-' + p.id);
+    if (!badge) return;
+    if (p.trigger === 'product') {
+      badge.textContent  = triggers.product ? '✓ Will activate' : 'Waiting for product content';
+      badge.className    = 'trigger-badge' + (triggers.product ? ' active' : '');
+    } else if (p.trigger === 'finance') {
+      badge.textContent  = triggers.finance ? '✓ Will activate' : 'Waiting for numbers';
+      badge.className    = 'trigger-badge' + (triggers.finance ? ' active' : '');
+    }
+  });
 }
 
 // ── Render personas ────────────────────────────────────────────────────────
@@ -128,15 +231,22 @@ function render() {
   const list = document.getElementById('personasList');
   list.innerHTML = '';
   personas.forEach(p => {
+    const hasTrigger = !!p.trigger;
     const card = document.createElement('div');
-    card.className = 'persona-review-card';
+    card.className = 'persona-review-card' + (hasTrigger ? ' smart-trigger' : '');
     card.id = 'card-' + p.id;
+
+    const triggerBadgeHtml = hasTrigger
+      ? `<span class="trigger-badge" id="trigger-${p.id}">${p.triggerLabel || 'Smart activate'}</span>`
+      : '';
+
     card.innerHTML = `
       <div class="persona-header" onclick="toggleCard('${p.id}')">
         <span class="persona-icon">${p.emoji}</span>
         <div class="persona-info">
           <h3>${p.name}</h3>
           <p>${p.tagline}</p>
+          ${triggerBadgeHtml}
         </div>
         <button class="persona-run-btn" id="btn-${p.id}" onclick="event.stopPropagation(); runOne('${p.id}')">Review →</button>
         <button class="persona-run-btn" style="margin-left:4px;color:#888" onclick="event.stopPropagation(); editPersona('${p.id}')">edit</button>
@@ -146,6 +256,10 @@ function render() {
     `;
     list.appendChild(card);
   });
+
+  // Re-evaluate triggers based on current doc
+  const doc = document.getElementById('docInput').value;
+  if (doc) updateTriggerBadges(detectTriggers(doc));
 }
 
 function toggleCard(id) {
@@ -155,13 +269,14 @@ function toggleCard(id) {
 
 // ── Call Claude ────────────────────────────────────────────────────────────
 async function callClaude(systemPrompt, userDoc) {
+  const body = { system: systemPrompt, document: userDoc };
   const key = getKey();
-  if (!key) throw new Error('No API key');
+  if (key) body.apiKey = key;
 
   const res = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ system: systemPrompt, document: userDoc }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -176,7 +291,6 @@ async function callClaude(systemPrompt, userDoc) {
 async function runOne(id) {
   const doc = document.getElementById('docInput').value.trim();
   if (!doc) { alert('Please paste a document first.'); return; }
-  if (!getKey()) { alert('Enter your Anthropic API key at the top.'); return; }
 
   const persona = personas.find(p => p.id === id);
   const resp = document.getElementById('resp-' + id);
@@ -200,14 +314,21 @@ async function runOne(id) {
   }
 }
 
-// ── Run all ────────────────────────────────────────────────────────────────
+// ── Run all (respects smart triggers) ─────────────────────────────────────
 async function runAll() {
   const doc = document.getElementById('docInput').value.trim();
   if (!doc) { alert('Please paste a document first.'); return; }
-  if (!getKey()) { alert('Enter your Anthropic API key at the top.'); return; }
+
+  const triggers = detectTriggers(doc);
+  const toRun = personas.filter(p => {
+    if (!p.trigger) return true;
+    if (p.trigger === 'product') return triggers.product;
+    if (p.trigger === 'finance')  return triggers.finance;
+    return false;
+  });
 
   document.getElementById('runAllBtn').disabled = true;
-  await Promise.all(personas.map(p => runOne(p.id)));
+  await Promise.all(toRun.map(p => runOne(p.id)));
   document.getElementById('runAllBtn').disabled = false;
 }
 
@@ -229,10 +350,7 @@ function openModal(id) {
     document.getElementById('mTagline').value = p.tagline;
     document.getElementById('mPrompt').value  = p.prompt;
   } else {
-    document.getElementById('mEmoji').value   = '';
-    document.getElementById('mName').value    = '';
-    document.getElementById('mTagline').value = '';
-    document.getElementById('mPrompt').value  = '';
+    ['mEmoji','mName','mTagline','mPrompt'].forEach(id => document.getElementById(id).value = '');
   }
   document.getElementById('modalOverlay').classList.remove('hidden');
 }
@@ -266,17 +384,13 @@ function deletePersona(id) {
   render();
 }
 
-// Close modal on backdrop click
+// ── Init ──────────────────────────────────────────────────────────────────
 document.getElementById('modalOverlay').addEventListener('click', e => {
   if (e.target === document.getElementById('modalOverlay')) closeModal();
 });
 
-// Restore key from session
 const savedKey = sessionStorage.getItem('panel_key') || '';
-if (savedKey) {
-  document.getElementById('apiKey').value = savedKey;
-  saveKey();
-}
+if (savedKey) { document.getElementById('apiKey').value = savedKey; saveKey(); }
 
 render();
 </script>
